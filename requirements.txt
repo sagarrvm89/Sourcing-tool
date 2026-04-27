@@ -6,3 +6,5 @@ Flask-Login
 Werkzeug
 requests
 playwright
+pandas
+openpyxl
