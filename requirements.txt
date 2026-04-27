@@ -4,3 +4,4 @@ PyMuPDF
 python-docx
 Flask-Login
 Werkzeug
+requests
