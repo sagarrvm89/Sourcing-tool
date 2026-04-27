@@ -1,11 +1,12 @@
 <h2>Resume Analyzer</h2>
 
-<form action="/analyze" method="post">
+<form action="/analyze" method="post" enctype="multipart/form-data">
+    
+    <label>Upload Resume (PDF/DOCX):</label><br>
+    <input type="file" name="resume_file"><br><br>
+
     <label>Job Description:</label><br>
     <textarea name="job_desc" rows="6" cols="60"></textarea><br><br>
-
-    <label>Resume Text:</label><br>
-    <textarea name="resume_text" rows="6" cols="60"></textarea><br><br>
 
     <button type="submit">Analyze</button>
 </form>
