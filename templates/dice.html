@@ -1,1 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dice Jobs</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
 
+<header>
+    <h1>Dice Job Search</h1>
+</header>
+
+<nav>
+    <a href="/">Home</a>
+    <a href="/resume-analyzer">Resume Analyzer</a>
+    <a href="/adzuna-jobs">Adzuna Jobs</a>
+    <a href="/jooble-jobs">Jooble Jobs</a>
+    <a href="/dice-jobs">Dice Jobs</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/logout">Logout</a>
+</nav>
+
+<div class="container">
+    <p>Dice does not provide a simple free public API for this MVP, so this page creates a safe direct Dice search link.</p>
+
+    <form method="post">
+        <label>Keyword:</label><br>
+        <input type="text" name="keyword" placeholder="VMware Engineer" required><br><br>
+
+        <label>Location:</label><br>
+        <input type="text" name="location" placeholder="United States or Remote" required><br><br>
+
+        <button type="submit">Create Dice Search Link</button>
+    </form>
+
+    {% if search_url %}
+        <div class="result-box">
+            <h3>Dice Search Link</h3>
+            <a href="{{ search_url }}" target="_blank">
+                <button>Open Dice Jobs</button>
+            </a>
+        </div>
+    {% endif %}
+</div>
+
+</body>
+</html>
