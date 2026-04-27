@@ -1,13 +1,39 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import check_password_hash
 import os
 import re
-import fitz  # PyMuPDF
+import json
+import fitz
 from docx import Document
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB upload limit
+app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
+
+
+class User(UserMixin):
+    def __init__(self, username):
+        self.id = username
+
+
+def get_users():
+    users_json = os.environ.get("USERS_JSON", "{}")
+    return json.loads(users_json)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    users = get_users()
+    if user_id in users:
+        return User(user_id)
+    return None
 
 
 def allowed_file(filename):
@@ -17,34 +43,31 @@ def allowed_file(filename):
 def clean_words(text):
     text = text.lower()
     text = re.sub(r"[^a-zA-Z0-9+#.\- ]", " ", text)
-    words = text.split()
-
     stop_words = {
         "the", "and", "or", "a", "an", "to", "for", "of", "in", "on", "with",
         "is", "are", "was", "were", "be", "as", "by", "at", "from", "this",
         "that", "you", "your", "we", "our", "they", "their", "will", "can",
         "must", "have", "has", "had", "it", "not", "but", "if", "then"
     }
-
-    return [word for word in words if len(word) > 2 and word not in stop_words]
+    return [word for word in text.split() if len(word) > 2 and word not in stop_words]
 
 
 def extract_text_from_file(file):
     filename = file.filename.lower()
 
     if filename.endswith(".pdf"):
-        resume_text = ""
+        text = ""
         pdf = fitz.open(stream=file.read(), filetype="pdf")
         for page in pdf:
-            resume_text += page.get_text()
-        return resume_text
+            text += page.get_text()
+        return text
 
     if filename.endswith(".docx"):
-        resume_text = ""
+        text = ""
         doc = Document(file)
         for para in doc.paragraphs:
-            resume_text += para.text + "\n"
-        return resume_text
+            text += para.text + "\n"
+        return text
 
     if filename.endswith(".txt"):
         return file.read().decode("utf-8", errors="ignore")
@@ -52,27 +75,56 @@ def extract_text_from_file(file):
     return ""
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+
+        users = get_users()
+
+        if username in users and check_password_hash(users[username], password):
+            login_user(User(username))
+            return redirect(url_for("home"))
+
+        flash("Invalid username or password")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def home():
-    return render_template("home.html")
+    return render_template("home.html", user=current_user.id)
 
 
 @app.route("/resume-analyzer")
+@login_required
 def resume_analyzer():
     return render_template("analyzer.html")
 
 
 @app.route("/adzuna-jobs")
+@login_required
 def adzuna_jobs():
     return render_template("adzuna.html")
 
 
 @app.route("/jooble-jobs")
+@login_required
 def jooble_jobs():
     return render_template("jooble.html")
 
 
 @app.route("/dice-jobs")
+@login_required
 def dice_jobs():
     return render_template("dice.html")
 
@@ -83,6 +135,7 @@ def privacy():
 
 
 @app.route("/analyze", methods=["POST"])
+@login_required
 def analyze():
     job_desc = request.form.get("job_desc", "")
     file = request.files.get("resume_file")
@@ -96,7 +149,7 @@ def analyze():
     resume_text = extract_text_from_file(file)
 
     if not resume_text.strip():
-        return "Could not read resume content. Please try another file."
+        return "Could not read resume content."
 
     job_words = set(clean_words(job_desc))
     resume_words = set(clean_words(resume_text))
@@ -104,9 +157,7 @@ def analyze():
     matched = sorted(job_words & resume_words)
     missing = sorted(job_words - resume_words)
 
-    score = 0
-    if job_words:
-        score = int((len(matched) / len(job_words)) * 100)
+    score = int((len(matched) / len(job_words)) * 100) if job_words else 0
 
     return render_template(
         "results.html",
