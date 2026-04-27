@@ -1,15 +1,23 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    login_user,
+    logout_user,
+    login_required,
+    current_user,
+)
 from werkzeug.security import check_password_hash
 import os
 import re
 import json
 import fitz
+import requests
 from docx import Document
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB upload limit
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -43,12 +51,15 @@ def allowed_file(filename):
 def clean_words(text):
     text = text.lower()
     text = re.sub(r"[^a-zA-Z0-9+#.\- ]", " ", text)
+
     stop_words = {
         "the", "and", "or", "a", "an", "to", "for", "of", "in", "on", "with",
         "is", "are", "was", "were", "be", "as", "by", "at", "from", "this",
         "that", "you", "your", "we", "our", "they", "their", "will", "can",
-        "must", "have", "has", "had", "it", "not", "but", "if", "then"
+        "must", "have", "has", "had", "it", "not", "but", "if", "then",
+        "about", "into", "using", "use", "used", "work", "working"
     }
+
     return [word for word in text.split() if len(word) > 2 and word not in stop_words]
 
 
@@ -111,29 +122,6 @@ def resume_analyzer():
     return render_template("analyzer.html")
 
 
-@app.route("/adzuna-jobs")
-@login_required
-def adzuna_jobs():
-    return render_template("adzuna.html")
-
-
-@app.route("/jooble-jobs")
-@login_required
-def jooble_jobs():
-    return render_template("jooble.html")
-
-
-@app.route("/dice-jobs")
-@login_required
-def dice_jobs():
-    return render_template("dice.html")
-
-
-@app.route("/privacy")
-def privacy():
-    return render_template("privacy.html")
-
-
 @app.route("/analyze", methods=["POST"])
 @login_required
 def analyze():
@@ -165,6 +153,104 @@ def analyze():
         matched=matched[:50],
         missing=missing[:50]
     )
+
+
+@app.route("/adzuna-jobs", methods=["GET", "POST"])
+@login_required
+def adzuna_jobs():
+    jobs = []
+    error = None
+
+    if request.method == "POST":
+        keyword = request.form.get("keyword", "")
+        location = request.form.get("location", "")
+
+        app_id = os.environ.get("ADZUNA_APP_ID")
+        app_key = os.environ.get("ADZUNA_APP_KEY")
+
+        if not app_id or not app_key:
+            error = "Adzuna API credentials are missing."
+        else:
+            url = "https://api.adzuna.com/v1/api/jobs/us/search/1"
+
+            params = {
+                "app_id": app_id,
+                "app_key": app_key,
+                "what": keyword,
+                "where": location,
+                "results_per_page": 10,
+            }
+
+            try:
+                response = requests.get(url, params=params, timeout=20)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    jobs = data.get("results", [])
+                else:
+                    error = f"Adzuna API error: {response.status_code}"
+            except Exception as e:
+                error = f"Adzuna request failed: {str(e)}"
+
+    return render_template("adzuna.html", jobs=jobs, error=error)
+
+
+@app.route("/jooble-jobs", methods=["GET", "POST"])
+@login_required
+def jooble_jobs():
+    jobs = []
+    error = None
+
+    if request.method == "POST":
+        keyword = request.form.get("keyword", "")
+        location = request.form.get("location", "")
+
+        api_key = os.environ.get("JOOBLE_API_KEY")
+
+        if not api_key:
+            error = "Jooble API key is missing."
+        else:
+            url = f"https://jooble.org/api/{api_key}"
+
+            payload = {
+                "keywords": keyword,
+                "location": location,
+            }
+
+            try:
+                response = requests.post(url, json=payload, timeout=20)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    jobs = data.get("jobs", [])
+                else:
+                    error = f"Jooble API error: {response.status_code}"
+            except Exception as e:
+                error = f"Jooble request failed: {str(e)}"
+
+    return render_template("jooble.html", jobs=jobs, error=error)
+
+
+@app.route("/dice-jobs", methods=["GET", "POST"])
+@login_required
+def dice_jobs():
+    search_url = None
+
+    if request.method == "POST":
+        keyword = request.form.get("keyword", "")
+        location = request.form.get("location", "")
+
+        search_url = (
+            "https://www.dice.com/jobs?"
+            f"q={keyword.replace(' ', '+')}&location={location.replace(' ', '+')}"
+        )
+
+    return render_template("dice.html", search_url=search_url)
+
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
 
 
 if __name__ == "__main__":
