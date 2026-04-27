@@ -2,21 +2,36 @@
 <html>
 <head>
     <title>Resume Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+<header>
     <h1>Resume Analyzer</h1>
+</header>
+
+<nav>
+    <a href="/">Home</a>
+    <a href="/resume-analyzer">Resume Analyzer</a>
+    <a href="/adzuna-jobs">Adzuna Jobs</a>
+    <a href="/jooble-jobs">Jooble Jobs</a>
+    <a href="/dice-jobs">Dice Jobs</a>
+    <a href="/privacy">Privacy</a>
+</nav>
+
+<div class="container">
+    <h2>Upload Resume</h2>
 
     <form action="/analyze" method="post" enctype="multipart/form-data">
-        <label>Upload Resume:</label><br>
+        <label>Upload Resume PDF/DOCX/TXT:</label><br>
         <input type="file" name="resume_file" accept=".pdf,.docx,.txt" required><br><br>
 
         <label>Paste Job Description:</label><br>
-        <textarea name="job_desc" rows="10" cols="80" required></textarea><br><br>
+        <textarea name="job_desc" rows="10" required></textarea><br><br>
 
         <button type="submit">Analyze Resume</button>
     </form>
+</div>
 
-    <br>
-    <a href="/">Back Home</a>
 </body>
 </html>
