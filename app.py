@@ -1,29 +1,37 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_login import (
-    LoginManager,
-    UserMixin,
-    login_user,
-    logout_user,
-    login_required,
-    current_user,
-)
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
+from io import BytesIO
+from urllib.parse import quote_plus
 import os
 import re
 import json
-import fitz
+import pandas as pd
 import requests
+import fitz
 from docx import Document
+from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB upload limit
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = "login"
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
+
+DEFAULT_KEYWORDS = [
+    "automation test engineer",
+    "sdet",
+    "qa automation",
+    "devops",
+    "vmware",
+    "azure",
+]
+
+DEFAULT_LOCATION = "United States"
 
 
 class User(UserMixin):
@@ -84,6 +92,191 @@ def extract_text_from_file(file):
         return file.read().decode("utf-8", errors="ignore")
 
     return ""
+
+
+def create_excel_download(jobs, filename):
+    output = BytesIO()
+    df = pd.DataFrame(jobs)
+
+    if df.empty:
+        df = pd.DataFrame([{"Message": "No jobs found"}])
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Jobs")
+
+    output.seek(0)
+
+    return send_file(
+        output,
+        download_name=filename,
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+def search_adzuna_jobs():
+    jobs = []
+
+    app_id = os.environ.get("ADZUNA_APP_ID")
+    app_key = os.environ.get("ADZUNA_APP_KEY")
+
+    if not app_id or not app_key:
+        return jobs
+
+    pages = 3
+    max_days_old = 7
+
+    for keyword in DEFAULT_KEYWORDS:
+        for page in range(1, pages + 1):
+            url = f"https://api.adzuna.com/v1/api/jobs/us/search/{page}"
+
+            params = {
+                "app_id": app_id.strip(),
+                "app_key": app_key.strip(),
+                "what": keyword,
+                "where": DEFAULT_LOCATION,
+                "results_per_page": 50,
+                "max_days_old": max_days_old,
+                "sort_by": "date",
+                "content-type": "application/json"
+            }
+
+            try:
+                response = requests.get(url, params=params, timeout=20)
+                if response.status_code != 200:
+                    continue
+
+                data = response.json()
+
+                for job in data.get("results", []):
+                    jobs.append({
+                        "Job Title": job.get("title", ""),
+                        "Company": job.get("company", {}).get("display_name", ""),
+                        "Location": job.get("location", {}).get("display_name", ""),
+                        "Posted Date": job.get("created", ""),
+                        "Source": "Adzuna",
+                        "Job URL": job.get("redirect_url", "")
+                    })
+
+            except Exception:
+                continue
+
+    df = pd.DataFrame(jobs)
+    if not df.empty:
+        df.drop_duplicates(subset=["Job URL"], inplace=True)
+        jobs = df.to_dict("records")
+
+    return jobs
+
+
+def search_jooble_jobs():
+    jobs = []
+
+    api_key = os.environ.get("JOOBLE_API_KEY")
+
+    if not api_key:
+        return jobs
+
+    keywords = "engineer OR developer OR software OR analyst"
+    pages = 5
+
+    for page in range(1, pages + 1):
+        url = f"https://jooble.org/api/{api_key}"
+
+        payload = {
+            "keywords": keywords,
+            "location": DEFAULT_LOCATION,
+            "page": page
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=20)
+
+            if response.status_code != 200:
+                continue
+
+            data = response.json()
+
+            for job in data.get("jobs", []):
+                jobs.append({
+                    "Job Title": job.get("title", ""),
+                    "Company": job.get("company", ""),
+                    "Location": job.get("location", ""),
+                    "Posted Date": job.get("updated", ""),
+                    "Source": "Jooble",
+                    "Job URL": job.get("link", "")
+                })
+
+        except Exception:
+            continue
+
+    df = pd.DataFrame(jobs)
+    if not df.empty:
+        df.drop_duplicates(subset=["Job URL"], inplace=True)
+        jobs = df.to_dict("records")
+
+    return jobs
+
+
+def scrape_dice_jobs(keyword="technology", location="United States", total_pages=5):
+    results = []
+    seen_urls = set()
+
+    keyword_q = quote_plus(keyword)
+    location_q = quote_plus(location)
+
+    base_url = (
+        f"https://www.dice.com/jobs?q={keyword_q}"
+        f"&location={location_q}&radius=30&radiusUnit=mi&page="
+    )
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        for page_number in range(1, total_pages + 1):
+            page_url = base_url + str(page_number)
+
+            page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+
+            for _ in range(3):
+                page.mouse.wheel(0, 1500)
+                page.wait_for_timeout(700)
+
+            links = page.locator("a[href*='/job-detail/']").all()
+
+            for link in links:
+                try:
+                    title = " ".join(link.inner_text().split())
+                    url = link.get_attribute("href")
+
+                    if not title or title.lower() in ["apply now", "easy apply"]:
+                        continue
+
+                    if url.startswith("/"):
+                        url = "https://www.dice.com" + url
+
+                    if url in seen_urls:
+                        continue
+
+                    seen_urls.add(url)
+
+                    results.append({
+                        "Job Title": title,
+                        "Company": "",
+                        "Location": location,
+                        "Posted Date": "",
+                        "Source": "Dice",
+                        "Job URL": url
+                    })
+
+                except Exception:
+                    continue
+
+        browser.close()
+
+    return results
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -155,97 +348,61 @@ def analyze():
     )
 
 
-@app.route("/adzuna-jobs", methods=["GET", "POST"])
+@app.route("/adzuna-jobs")
 @login_required
 def adzuna_jobs():
-    jobs = []
-    error = None
-
-    if request.method == "POST":
-        keyword = request.form.get("keyword", "")
-        location = request.form.get("location", "")
-
-        app_id = os.environ.get("ADZUNA_APP_ID")
-        app_key = os.environ.get("ADZUNA_APP_KEY")
-
-        if not app_id or not app_key:
-            error = "Adzuna API credentials are missing."
-        else:
-            url = "https://api.adzuna.com/v1/api/jobs/us/search/1"
-
-            params = {
-                "app_id": app_id,
-                "app_key": app_key,
-                "what": keyword,
-                "where": location,
-                "results_per_page": 10,
-            }
-
-            try:
-                response = requests.get(url, params=params, timeout=20)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    jobs = data.get("results", [])
-                else:
-                    error = f"Adzuna API error: {response.status_code}"
-            except Exception as e:
-                error = f"Adzuna request failed: {str(e)}"
-
-    return render_template("adzuna.html", jobs=jobs, error=error)
+    jobs = search_adzuna_jobs()
+    return render_template("adzuna.html", jobs=jobs, error=None)
 
 
-@app.route("/jooble-jobs", methods=["GET", "POST"])
+@app.route("/download-adzuna")
+@login_required
+def download_adzuna():
+    jobs = search_adzuna_jobs()
+    return create_excel_download(jobs, "adzuna_jobs_last_7_days.xlsx")
+
+
+@app.route("/jooble-jobs")
 @login_required
 def jooble_jobs():
-    jobs = []
-    error = None
+    jobs = search_jooble_jobs()
+    return render_template("jooble.html", jobs=jobs, error=None)
 
-    if request.method == "POST":
-        keyword = request.form.get("keyword", "")
-        location = request.form.get("location", "")
 
-        api_key = os.environ.get("JOOBLE_API_KEY")
-
-        if not api_key:
-            error = "Jooble API key is missing."
-        else:
-            url = f"https://jooble.org/api/{api_key}"
-
-            payload = {
-                "keywords": keyword,
-                "location": location,
-            }
-
-            try:
-                response = requests.post(url, json=payload, timeout=20)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    jobs = data.get("jobs", [])
-                else:
-                    error = f"Jooble API error: {response.status_code}"
-            except Exception as e:
-                error = f"Jooble request failed: {str(e)}"
-
-    return render_template("jooble.html", jobs=jobs, error=error)
+@app.route("/download-jooble")
+@login_required
+def download_jooble():
+    jobs = search_jooble_jobs()
+    return create_excel_download(jobs, "jooble_tech_jobs.xlsx")
 
 
 @app.route("/dice-jobs", methods=["GET", "POST"])
 @login_required
 def dice_jobs():
-    search_url = None
+    jobs = []
+    error = None
 
     if request.method == "POST":
-        keyword = request.form.get("keyword", "")
-        location = request.form.get("location", "")
+        keyword = request.form.get("keyword", "technology").strip()
+        location = request.form.get("location", "United States").strip()
+        total_pages = int(request.form.get("total_pages", 5))
 
-        search_url = (
-            "https://www.dice.com/jobs?"
-            f"q={keyword.replace(' ', '+')}&location={location.replace(' ', '+')}"
-        )
+        if total_pages > 5:
+            total_pages = 5
 
-    return render_template("dice.html", search_url=search_url)
+        try:
+            jobs = scrape_dice_jobs(keyword, location, total_pages)
+        except Exception as e:
+            error = f"Dice scraping failed: {str(e)}"
+
+    return render_template("dice.html", jobs=jobs, error=error)
+
+
+@app.route("/download-dice")
+@login_required
+def download_dice():
+    jobs = scrape_dice_jobs("technology", "United States", 5)
+    return create_excel_download(jobs, "dice_jobs.xlsx")
 
 
 @app.route("/privacy")
