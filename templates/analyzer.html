@@ -1,14 +1,22 @@
-<h2>Resume Analyzer</h2>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Analyzer</title>
+</head>
+<body>
+    <h1>Resume Analyzer</h1>
 
-<form action="/analyze" method="post" enctype="multipart/form-data">
-    
-    <label>Upload Resume (PDF/DOCX):</label><br>
-    <input type="file" name="resume_file"><br><br>
+    <form action="/analyze" method="post" enctype="multipart/form-data">
+        <label>Upload Resume:</label><br>
+        <input type="file" name="resume_file" accept=".pdf,.docx,.txt" required><br><br>
 
-    <label>Job Description:</label><br>
-    <textarea name="job_desc" rows="6" cols="60"></textarea><br><br>
+        <label>Paste Job Description:</label><br>
+        <textarea name="job_desc" rows="10" cols="80" required></textarea><br><br>
 
-    <button type="submit">Analyze</button>
-</form>
+        <button type="submit">Analyze Resume</button>
+    </form>
 
-<a href="/">Back Home</a>
+    <br>
+    <a href="/">Back Home</a>
+</body>
+</html>
