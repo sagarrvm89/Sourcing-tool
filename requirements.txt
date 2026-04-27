@@ -5,6 +5,6 @@ python-docx
 Flask-Login
 Werkzeug
 requests
-playwright
 pandas
 openpyxl
+playwright
