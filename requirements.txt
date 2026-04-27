@@ -2,3 +2,5 @@ flask
 gunicorn
 PyMuPDF
 python-docx
+Flask-Login
+Werkzeug
