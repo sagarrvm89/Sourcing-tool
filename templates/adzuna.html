@@ -1,1 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Adzuna Jobs</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
 
+<header>
+    <h1>Adzuna Job Search</h1>
+</header>
+
+<nav>
+    <a href="/">Home</a>
+    <a href="/resume-analyzer">Resume Analyzer</a>
+    <a href="/adzuna-jobs">Adzuna Jobs</a>
+    <a href="/jooble-jobs">Jooble Jobs</a>
+    <a href="/dice-jobs">Dice Jobs</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/logout">Logout</a>
+</nav>
+
+<div class="container">
+    <form method="post">
+        <label>Keyword:</label><br>
+        <input type="text" name="keyword" placeholder="Azure VMware Engineer" required><br><br>
+
+        <label>Location:</label><br>
+        <input type="text" name="location" placeholder="United States or Remote" required><br><br>
+
+        <button type="submit">Search Adzuna</button>
+    </form>
+
+    {% if error %}
+        <div class="result-box">
+            <p>{{ error }}</p>
+        </div>
+    {% endif %}
+
+    {% for job in jobs %}
+        <div class="result-box">
+            <h3>{{ job.title }}</h3>
+            <p><strong>Company:</strong> {{ job.company.display_name }}</p>
+            <p><strong>Location:</strong> {{ job.location.display_name }}</p>
+            <p>{{ job.description[:300] }}...</p>
+            <a href="{{ job.redirect_url }}" target="_blank">
+                <button>Apply / View Job</button>
+            </a>
+        </div>
+    {% endfor %}
+</div>
+
+</body>
+</html>
